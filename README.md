@@ -4,7 +4,7 @@ Fizik tabanlı araç çarpışması ve araçtan fırlama sistemi (FiveM, GTA V E
 
 Karakter araçtan ayrıldığı ilk karede **ragdoll'dadır**; havada oturma/sürüş pozu korunmaz. Fırlama yönü sabit heading'den değil, çarpışma öncesi gerçek dünya velocity'sinden ve çarpışmadaki velocity değişiminden hesaplanır.
 
-- Oyun mantığı yalnızca client'ta. Veritabanı yok. Tek server dosyası `server/debug.lua` (yalnızca `Config.Debug.serverLog` açıkken debug satırlarını sunucu loguna yazar).
+- Oyun mantığı yalnızca client'ta. Veritabanı yok. Server dosyaları: `server/debug.lua` (yalnızca `Config.Debug.serverLog` açıkken debug satırlarını sunucu loguna yazar) ve `server/sync.lua` (fırlama verisini yakındaki oyunculara iletir, bkz. [Diğer oyuncuların görmesi](#diğer-oyuncuların-görmesi)).
 - Yalnızca yerel oyuncunun kendi ped'ini yönetir (NPC yok). Her istemci kendi ped'inin sahibi olduğundan network sahiplik sorunu oluşmaz.
 - qbx_core zorunlu değil; varsa ölü/baygın bilgisi `exports.qbx_core:GetPlayerData()` ile yalnızca **okunur**.
 
@@ -95,6 +95,19 @@ Dönüş için net doğrusal hız üretmeyen merkez dışı impuls çiftleri uyg
 6. Ragdoll teyit edilince fırlatma velocity'si ve dönüş impulsları verilir, hasar bir kez uygulanır.
 7. Ped araç kutusundan çıkana kadar (150 ms – 1200 ms) araçla çarpışması kapalı tutulur, koltuğa geri yapışmaz.
 8. Havadayken ragdoll erken biterse yeniden başlatılır. Yere inip ragdoll bitince GTA'nın normal kalkma davranışı devralır.
+
+## Diğer oyuncuların görmesi
+
+Fırlayan oyuncunun ped'i koltuktan animasyonsuz ayrılıp aynı karede ragdoll'a geçer. Diğer istemcilerdeki klonu bu geçişi senkron bir "araçtan in" görevi olarak almaz: ragdoll süresince koltukta oturur görünür, ragdoll bitince düştüğü yere ışınlanır.
+
+`Config.Sync.enabled = true` (varsayılan) iken:
+
+1. Fırlayan istemci ragdoll teyit edilip velocity verildiği anda başlangıç noktası, fırlatma velocity'si ve dönüş impulslarını `loe_crash:ejected` ile sunucuya gönderir.
+2. `server/sync.lua` gönderen kimliğini `source`'tan alır (oyuncu yalnızca kendi fırlamasını bildirebilir), oran sınırı (1 sn) ve başlangıç noktası mesafe kontrolü yapar, `Config.Sync.range` içindeki oyunculara iletir. OneSync kapalıysa herkese iletir; istemciler mesafeyi kendisi filtreler.
+3. İzleyici istemcide klon hâlâ koltuktaysa gerçek klon yalnızca o ekranda gizlenir (`SetEntityLocallyInvisible`) ve ağa kaydedilmeyen bir kopyası (`ClonePed`, `isNetwork = false`) aynı başlangıç noktası, velocity ve dönüşle ragdoll olarak fırlatılır.
+4. Gerçek klon araçtan ayrıldığı anda kopya silinir ve gerçek ped tekrar görünür. Klon zaten koltuktan ayrılmışsa kopya hiç oluşturulmaz.
+
+Gelen değerler alıcıda `Config.Launch` tavanlarıyla doğrulanır. Kopya hasar almaz, kimseyi etkilemez; yalnızca görseldir.
 
 ## Emniyet kemeri
 
@@ -190,4 +203,5 @@ Kırılabilen direkler (lamba direkleri) aracı tam durdurmayabilir; hız kaybı
 - Başka bir oyuncunun kullandığı araçta **yolcuyken**, aracın velocity'si network üzerinden gelir ve yumuşatılmış olabilir. Tespit çalışır, ancak eşiklere daha geç ulaşılabilir.
 - Duran araca yandan çarpılması varsayılan olarak fırlatmaz (`side.minSpeedBeforeKmh = 40`). Gerçekte de bu durumda yolcu genellikle araç içinde kalır. İstenirse 0 yapılabilir.
 - Dönüş impulslarının görsel etkisi ped modeline göre değişebilir; değerler oyunda ayarlanmak üzere muhafazakâr seçildi.
+- Diğer oyuncuların ekranındaki kopya aynı başlangıç koşullarıyla fırlar, ancak ragdoll fiziği istemciler arasında birebir aynı değildir. Gerçek klon araçtan ayrılınca (fırlayan oyuncu kalktığında) konum farkı kadar küçük bir sıçrama görülebilir.
 

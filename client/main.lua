@@ -19,6 +19,8 @@
 
 local P = CrashPhysics
 local Dbg = CrashDebug
+local S = CrashSync
+local requestRagdoll, applySpinPair, disableVehicleCollision = S.requestRagdoll, S.applySpinPair, S.disableVehicleCollision
 
 local STATE = {
     OUTSIDE  = 'OUTSIDE',
@@ -34,8 +36,6 @@ local WINDSCREEN_FLAG = 32                -- CPED_CONFIG_FLAG_WillFlyThroughWind
 -- çarpan aracın içine de düşmesin (kendi aracı ışında yok sayılır)
 local TRACE_EXIT_FLAGS = 1 + 2 + 16
 local TRACE_OPTIONS = 4                   -- OptionIgnoreNoCollision
-local RAGDOLL_TYPE_NORMAL = 0
-local APPLY_TYPE_IMPULSE = 1
 
 local ctx = {
     state = STATE.OUTSIDE,
@@ -198,38 +198,11 @@ local function adjustExitForWorld(veh, seatPos, start)
     return start
 end
 
--- Sıra önemli olabildiği için (native dokümanı) iki yönde de kapatılır.
--- thisFrameOnly = true: kalıcı değil, her kare çağrıldığı sürece geçerli.
-local function disableVehicleCollision(ped, veh)
-    if veh ~= 0 and DoesEntityExist(veh) then
-        SetEntityNoCollisionEntity(ped, veh, true)
-        SetEntityNoCollisionEntity(veh, ped, true)
-    end
-end
-
 local function isInsideVehicleBox(ped, veh)
-    if veh == 0 or not DoesEntityExist(veh) or not ctx.dimsMin then return false end
-
-    local fwd = GetEntityForwardVector(veh)
-    local _, _, up, pos = GetEntityMatrix(veh)
-    local l = P.toLocal(P.sub(GetEntityCoords(ped), pos), fwd, P.cross(fwd, up), up)
-    local mn, mx, m = ctx.dimsMin, ctx.dimsMax, Config.Exit.boxMargin
-    return l.x > mn.x - m and l.x < mx.x + m
-        and l.y > mn.y - m and l.y < mx.y + m
-        and l.z > mn.z - m and l.z < mx.z + m
+    return S.isInsideVehicleBox(ped, veh, ctx.dimsMin, ctx.dimsMax)
 end
 
--- ------------------------------------------------------------------ kuvvet / hasar
-local function applySpinPair(ped, spin)
-    local lever = Config.Launch.spinLever
-    local ix, iy, iz = spin.dir.x * spin.speed, spin.dir.y * spin.speed, spin.dir.z * spin.speed
-    local ox, oy, oz = spin.lever.x * lever, spin.lever.y * lever, spin.lever.z * lever
-    -- APPLY_FORCE_TO_ENTITY(entity, forceType, x, y, z, offX, offY, offZ, nComponent,
-    --                       bLocalForce, bLocalOffset, bScaleByMass, bPlayAudio, bScaleByTimeWarp)
-    ApplyForceToEntity(ped, APPLY_TYPE_IMPULSE, ix, iy, iz, ox, oy, oz, 0, false, false, true, false, true)
-    ApplyForceToEntity(ped, APPLY_TYPE_IMPULSE, -ix, -iy, -iz, -ox, -oy, -oz, 0, false, false, true, false, true)
-end
-
+-- ------------------------------------------------------------------ hasar
 local function applyCrashDamage(ped, severity, belted)
     local amount = P.damageForSeverity(severity, Config.Damage)
     if belted then amount = math.floor(amount * Config.Damage.beltedMultiplier + 0.5) end
@@ -312,11 +285,6 @@ local function recordSample(veh, now)
 end
 
 -- ------------------------------------------------------------------ fırlatma
-local function requestRagdoll(ped)
-    local R = Config.Ragdoll
-    SetPedToRagdoll(ped, R.minMs, R.maxMs, RAGDOLL_TYPE_NORMAL, false, false, false)
-end
-
 -- Ped'i başlangıç noktasında, hızsız tutar. Koltuk bağlantısı hâlâ kopmadıysa
 -- SET_ENTITY_COORDS ped'i araçtan warp ederek çıkarır.
 local function holdAtStart(ped, start)
@@ -383,6 +351,10 @@ local function runEjection(ped, veh, an)
     for i = 1, #spins do
         applySpinPair(ped, spins[i])
     end
+
+    -- Diğer oyuncuların ekranında klon ragdoll boyunca koltukta kalır;
+    -- aynı başlangıç koşulları onlara gönderilir (client/sync.lua)
+    S.broadcastEjection(start, launch, spins)
 
     -- Hasar: çarpışma başına TEK kez, ragdoll başladıktan sonra
     -- (koltukta ölen ped araçta oturur kalırdı)

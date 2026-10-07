@@ -10,6 +10,17 @@ Config.Enabled = true
 -- değerine döndürülür.
 Config.DisableVanillaWindscreenEjection = true
 
+-- ------------------------------------------------------------------ DİĞER OYUNCULARA GÖSTERME
+-- Fırlayan oyuncunun klonu diğer ekranlarda ragdoll bitene kadar koltukta oturur
+-- görünür, sonra düştüğü yere ışınlanır. enabled = true: fırlatma verisi sunucu
+-- üzerinden yakındaki oyunculara gönderilir; onların ekranında klon hâlâ koltuktaysa
+-- gizlenir ve yerel (ağa kayıtsız) bir kopyası aynı başlangıç noktası, velocity ve
+-- dönüşle fırlatılır. Gerçek klon araçtan ayrılınca kopya silinir.
+Config.Sync = {
+    enabled = true,
+    range   = 150.0,   -- metre: fırlayan oyuncuya bu mesafedeki oyuncular fırlamayı görür
+}
+
 -- ------------------------------------------------------------------ DEBUG
 Config.Debug = {
     enabled        = false,        -- resource açılırken debug açık mı
