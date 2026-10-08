@@ -19,8 +19,6 @@
 
 local P = CrashPhysics
 local Dbg = CrashDebug
-local S = CrashSync
-local requestRagdoll, applySpinPair, disableVehicleCollision = S.requestRagdoll, S.applySpinPair, S.disableVehicleCollision
 
 local STATE = {
     OUTSIDE  = 'OUTSIDE',
@@ -36,6 +34,9 @@ local WINDSCREEN_FLAG = 32                -- CPED_CONFIG_FLAG_WillFlyThroughWind
 -- çarpan aracın içine de düşmesin (kendi aracı ışında yok sayılır)
 local TRACE_EXIT_FLAGS = 1 + 2 + 16
 local TRACE_OPTIONS = 4                   -- OptionIgnoreNoCollision
+local RAGDOLL_TYPE_NORMAL = 0
+local APPLY_TYPE_IMPULSE = 1
+local LEAVE_FLAG_WARP_OUT = 16            -- TASK_LEAVE_VEHICLE: animasyonsuz, ışınlanarak çıkış (kapı kapalı)
 
 local ctx = {
     state = STATE.OUTSIDE,
@@ -198,11 +199,38 @@ local function adjustExitForWorld(veh, seatPos, start)
     return start
 end
 
-local function isInsideVehicleBox(ped, veh)
-    return S.isInsideVehicleBox(ped, veh, ctx.dimsMin, ctx.dimsMax)
+-- Sıra önemli olabildiği için (native dokümanı) iki yönde de kapatılır.
+-- thisFrameOnly = true: kalıcı değil, her kare çağrıldığı sürece geçerli.
+local function disableVehicleCollision(ped, veh)
+    if veh ~= 0 and DoesEntityExist(veh) then
+        SetEntityNoCollisionEntity(ped, veh, true)
+        SetEntityNoCollisionEntity(veh, ped, true)
+    end
 end
 
--- ------------------------------------------------------------------ hasar
+local function isInsideVehicleBox(ped, veh)
+    if veh == 0 or not DoesEntityExist(veh) or not ctx.dimsMin then return false end
+
+    local fwd = GetEntityForwardVector(veh)
+    local _, _, up, pos = GetEntityMatrix(veh)
+    local l = P.toLocal(P.sub(GetEntityCoords(ped), pos), fwd, P.cross(fwd, up), up)
+    local mn, mx, m = ctx.dimsMin, ctx.dimsMax, Config.Exit.boxMargin
+    return l.x > mn.x - m and l.x < mx.x + m
+        and l.y > mn.y - m and l.y < mx.y + m
+        and l.z > mn.z - m and l.z < mx.z + m
+end
+
+-- ------------------------------------------------------------------ kuvvet / hasar
+local function applySpinPair(ped, spin)
+    local lever = Config.Launch.spinLever
+    local ix, iy, iz = spin.dir.x * spin.speed, spin.dir.y * spin.speed, spin.dir.z * spin.speed
+    local ox, oy, oz = spin.lever.x * lever, spin.lever.y * lever, spin.lever.z * lever
+    -- APPLY_FORCE_TO_ENTITY(entity, forceType, x, y, z, offX, offY, offZ, nComponent,
+    --                       bLocalForce, bLocalOffset, bScaleByMass, bPlayAudio, bScaleByTimeWarp)
+    ApplyForceToEntity(ped, APPLY_TYPE_IMPULSE, ix, iy, iz, ox, oy, oz, 0, false, false, true, false, true)
+    ApplyForceToEntity(ped, APPLY_TYPE_IMPULSE, -ix, -iy, -iz, -ox, -oy, -oz, 0, false, false, true, false, true)
+end
+
 local function applyCrashDamage(ped, severity, belted)
     local amount = P.damageForSeverity(severity, Config.Damage)
     if belted then amount = math.floor(amount * Config.Damage.beltedMultiplier + 0.5) end
@@ -285,6 +313,11 @@ local function recordSample(veh, now)
 end
 
 -- ------------------------------------------------------------------ fırlatma
+local function requestRagdoll(ped)
+    local R = Config.Ragdoll
+    SetPedToRagdoll(ped, R.minMs, R.maxMs, RAGDOLL_TYPE_NORMAL, false, false, false)
+end
+
 -- Ped'i başlangıç noktasında, hızsız tutar. Koltuk bağlantısı hâlâ kopmadıysa
 -- SET_ENTITY_COORDS ped'i araçtan warp ederek çıkarır.
 local function holdAtStart(ped, start)
@@ -293,6 +326,34 @@ local function holdAtStart(ped, start)
     end
     SetEntityCoordsNoOffset(ped, start.x, start.y, start.z, false, false, false)
     SetEntityVelocity(ped, 0.0, 0.0, 0.0)
+end
+
+-- Koltuktan ayırma (Config.Exit.method).
+-- 'task' : TaskLeaveVehicle(16) ağda senkron bir araçtan inme görevidir; diğer
+--          istemcilerdeki klon da koltuktan iner. Flag 16 animasyon oynatmaz,
+--          ped'i ışınlayarak çıkarır. Görev ped'in AI güncellemesinde işlenir;
+--          taskExitMaxFrames karede işlenmezse 'clear' ile kesilir.
+-- 'clear': ClearPedTasksImmediately yalnızca yerel ped'i koltuktan koparır; klonlar
+--          ragdoll bitene kadar koltukta oturur görünür.
+-- Dönüş: false = sıfırlama istendi, fırlatma yarıda bırakılmalı
+local function detachFromVehicle(ped, veh)
+    local E = Config.Exit
+    if E.method == 'task' then
+        TaskLeaveVehicle(ped, veh, LEAVE_FLAG_WARP_OUT)
+        local frames = 0
+        while truthy(IsPedInAnyVehicle(ped, false)) and frames < E.taskExitMaxFrames do
+            Wait(0)
+            if ctx.resetRequested or not DoesEntityExist(ped) then return false end
+            frames = frames + 1
+            disableVehicleCollision(ped, veh)
+        end
+        Dbg.log('araçtan inme görevi: %d kare, hâlâ araçta=%s  nt=%d',
+            frames, tostring(truthy(IsPedInAnyVehicle(ped, false))), GetNetworkTime())
+    end
+    if truthy(IsPedInAnyVehicle(ped, false)) then
+        ClearPedTasksImmediately(ped)
+    end
+    return true
 end
 
 local function runEjection(ped, veh, an)
@@ -306,18 +367,32 @@ local function runEjection(ped, veh, an)
     local start = adjustExitForWorld(veh, seatPos, P.computeExitStart(seatPos, launch, E))
     an.exitStart = start
 
-    -- 2-4) Sürüş/oturma görevi ve koltuk bağlantısı ANİMASYONSUZ kesilir.
-    --      TaskLeaveVehicle kullanılmaz: bütün flag'leri inme animasyonu
-    --      oynatır (4160 bile "kendini dışarı atma" animasyonu) ve görev
-    --      ancak sonraki karelerde başlar.
+    -- 2) Koltuktan ayırma, güvenli başlangıç noktası
     disableVehicleCollision(ped, veh)
-    ClearPedTasksImmediately(ped)
-
-    -- 5) Güvenli başlangıç noktası, velocity SIFIR. Ragdoll teyit edilmeden
-    --    ped'e hız verilirse donuk oturma pozuyla uçar (eski hatanın kendisi).
+    if not detachFromVehicle(ped, veh) then return end
     holdAtStart(ped, start)
 
-    -- 6) Ragdoll iste ve GERÇEKTEN aktif olduğunu doğrula
+    -- 3) AĞ DEVRİ: ped araçtan ayrıldığı karede ragdoll'a geçerse diğer istemcilerdeki
+    --    klon ragdoll bitene kadar koltukta kalır, sonra kapı yanına iner ve ped yürüyene
+    --    kadar orada durur. Ragdoll'dan önce networkHandoffMs boyunca ped araç dışında,
+    --    ragdoll'suz ve fırlatma hızıyla hareket eder; klonlar bu sürede koltuktan iner
+    --    ve ardından gerçek ragdoll'u izler.
+    --    0 = eski davranış: ped teyide kadar hızsız tutulur, velocity ragdoll'dan sonra
+    --    verilir (ragdoll'suz hız verilen oturan ped donuk pozla uçardı).
+    local handoff = E.networkHandoffMs > 0
+    if handoff then
+        SetEntityVelocity(ped, launch.x, launch.y, launch.z)
+        local handoffUntil = GetGameTimer() + E.networkHandoffMs
+        while GetGameTimer() < handoffUntil do
+            Wait(0)
+            if ctx.resetRequested or not DoesEntityExist(ped) then return end
+            disableVehicleCollision(ped, veh)
+        end
+    end
+
+    -- 4) Ragdoll iste ve GERÇEKTEN aktif olduğunu doğrula. Ağ devrinde ped hareketine
+    --    devam eder; aktivasyon anındaki hızı ragdoll gövdesine aktarılır.
+    local carry = handoff and GetEntityVelocity(ped) or launch
     requestRagdoll(ped)
     local active = truthy(IsPedRagdoll(ped))
     local frames = 0
@@ -328,13 +403,13 @@ local function runEjection(ped, veh, an)
         disableVehicleCollision(ped, veh)
         active = truthy(IsPedRagdoll(ped))
         if not active then
-            holdAtStart(ped, start)
+            if handoff then carry = GetEntityVelocity(ped) else holdAtStart(ped, start) end
             requestRagdoll(ped)
         end
     end
 
-    Dbg.log('ayrılma: araçta=%s  CanPedRagdoll=%s  ragdoll aktif=%s  (%d kare)',
-        tostring(truthy(IsPedInAnyVehicle(ped, false))), tostring(truthy(CanPedRagdoll(ped))), tostring(active), frames)
+    Dbg.log('ayrılma: araçta=%s  ragdoll aktif=%s  (%d kare)  ağ devri=%d ms  nt=%d',
+        tostring(truthy(IsPedInAnyVehicle(ped, false))), tostring(active), frames, E.networkHandoffMs, GetNetworkTime())
 
     if not active then
         an.reason = ('ragdoll %d karede aktive edilemedi, fırlatma iptal'):format(R.activationMaxFrames)
@@ -343,25 +418,21 @@ local function runEjection(ped, veh, an)
         return
     end
 
-    -- 7) Ragdoll aktif: hesaplanan dünya velocity'si gövdeye verilir
-    SetEntityVelocity(ped, launch.x, launch.y, launch.z)
+    -- 5) Ragdoll aktif: velocity gövdeye verilir
+    SetEntityVelocity(ped, carry.x, carry.y, carry.z)
 
-    -- 8) Doğal takla/dönüş için sınırlı merkez dışı impuls çiftleri
+    -- 6) Doğal takla/dönüş için sınırlı merkez dışı impuls çiftleri
     local spins = P.computeSpin(an, launch, Config.Launch, math.random)
     for i = 1, #spins do
         applySpinPair(ped, spins[i])
     end
-
-    -- Diğer oyuncuların ekranında klon ragdoll boyunca koltukta kalır;
-    -- aynı başlangıç koşulları onlara gönderilir (client/sync.lua)
-    S.broadcastEjection(start, launch, spins)
 
     -- Hasar: çarpışma başına TEK kez, ragdoll başladıktan sonra
     -- (koltukta ölen ped araçta oturur kalırdı)
     an.damage = applyCrashDamage(ped, an.severity, false)
     Dbg.report(an, true)
 
-    -- 9) Ragdoll'u koru; ped araç kutusundan çıkana kadar araçla çarpışmayı kapat
+    -- 7) Ragdoll'u koru; ped araç kutusundan çıkana kadar araçla çarpışmayı kapat
     setState(STATE.RAGDOLL, 'fırlatıldı')
     local launchedAt = GetGameTimer()
     while true do
@@ -380,7 +451,7 @@ local function runEjection(ped, veh, an)
                 -- Havadayken ragdoll erken biterse ayakta/oturur poza dönmesin
                 requestRagdoll(ped)
             elseif elapsed >= E.minNoCollisionMs then
-                -- 10) Yerde ve ragdoll bitti: GTA'nın normal kalkma davranışı devralır
+                -- 8) Yerde ve ragdoll bitti: GTA'nın normal kalkma davranışı devralır
                 break
             end
         end

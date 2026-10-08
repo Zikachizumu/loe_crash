@@ -9,20 +9,15 @@ version '1.0.0'
 
 shared_script 'config.lua'
 
--- Sira onemli: physics (saf matematik) -> debug -> sync -> main
+-- Sira onemli: physics (saf matematik) -> debug -> main
 client_scripts {
     'client/physics.lua',
     'client/debug.lua',
-    'client/sync.lua',
     'client/main.lua',
 }
 
--- debug: yalnizca Config.Debug.serverLog acikken debug satirlarini sunucu loguna yazar.
--- sync: firlama verisini yakindaki oyunculara iletir (Config.Sync).
--- Veritabani yok. qbx_core zorunlu degil: ol/baygin kontrolu icin varsa
--- exports.qbx_core:GetPlayerData() pcall ile okunur.
-server_scripts {
-    'server/debug.lua',
-    'server/sync.lua',
-}
+-- Yalnizca Config.Debug.serverLog acikken debug satirlarini sunucu loguna yazar;
+-- kapaliyken event hic kaydedilmez. Veritabani yok. qbx_core zorunlu degil: ol/baygin
+-- kontrolu icin varsa exports.qbx_core:GetPlayerData() pcall ile okunur.
+server_script 'server/debug.lua'
 

@@ -145,6 +145,43 @@ local function drawFrame()
     end
 end
 
+-- ------------------------------------------------------------------ uzak oyuncular
+-- Yakındaki diğer oyuncuların klonu için araçta/ragdoll geçişleri ağ zamanıyla (nt)
+-- yazılır. Fırlayan oyuncunun 'ayrılma ... nt=' satırıyla karşılaştırılınca klonun
+-- koltuktan bu ekranda ne kadar gecikmeyle indiği görülür.
+local REMOTE_CHECK_MS = 50
+local REMOTE_RANGE = 100.0
+local remote = {}
+local nextRemoteCheck = 0
+
+local function truthy(v) return v == true or v == 1 end
+
+local function watchRemotePlayers()
+    local now = GetGameTimer()
+    if not Config.Debug.printToConsole or now < nextRemoteCheck then return end
+    nextRemoteCheck = now + REMOTE_CHECK_MS
+
+    local me = PlayerId()
+    local myPos = GetEntityCoords(PlayerPedId())
+    for _, player in ipairs(GetActivePlayers()) do
+        if player ~= me then
+            local ped = GetPlayerPed(player)
+            local sid = GetPlayerServerId(player)
+            if ped ~= 0 and #(GetEntityCoords(ped) - myPos) <= REMOTE_RANGE then
+                local inVeh, rag = truthy(IsPedInAnyVehicle(ped, false)), truthy(IsPedRagdoll(ped))
+                local s = remote[sid]
+                if s and (s.ped ~= ped or s.inVeh ~= inVeh or s.rag ~= rag) then
+                    output(('uzak oyuncu %d: araçta=%s ragdoll=%s konum=%s nt=%d')
+                        :format(sid, tostring(inVeh), tostring(rag), vecText(GetEntityCoords(ped)), GetNetworkTime()))
+                end
+                remote[sid] = { ped = ped, inVeh = inVeh, rag = rag }
+            else
+                remote[sid] = nil
+            end
+        end
+    end
+end
+
 function D.setEnabled(on)
     D.enabled = on == true
     print(('[loe_crash] debug %s'):format(D.enabled and 'AÇIK' or 'KAPALI'))
@@ -154,6 +191,7 @@ function D.setEnabled(on)
         CreateThread(function()
             while D.enabled do
                 drawFrame()
+                watchRemotePlayers()
                 flushServerQueue()
                 Wait(0)
             end

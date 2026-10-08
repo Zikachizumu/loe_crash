@@ -10,17 +10,6 @@ Config.Enabled = true
 -- değerine döndürülür.
 Config.DisableVanillaWindscreenEjection = true
 
--- ------------------------------------------------------------------ DİĞER OYUNCULARA GÖSTERME
--- Fırlayan oyuncunun klonu diğer ekranlarda ragdoll bitene kadar koltukta oturur
--- görünür, sonra düştüğü yere ışınlanır. enabled = true: fırlatma verisi sunucu
--- üzerinden yakındaki oyunculara gönderilir; onların ekranında klon hâlâ koltuktaysa
--- gizlenir ve yerel (ağa kayıtsız) bir kopyası aynı başlangıç noktası, velocity ve
--- dönüşle fırlatılır. Gerçek klon araçtan ayrılınca kopya silinir.
-Config.Sync = {
-    enabled = true,
-    range   = 150.0,   -- metre: fırlayan oyuncuya bu mesafedeki oyuncular fırlamayı görür
-}
-
 -- ------------------------------------------------------------------ DEBUG
 Config.Debug = {
     enabled        = false,        -- resource açılırken debug açık mı
@@ -147,6 +136,20 @@ Config.Launch = {
 
 -- ------------------------------------------------------------------ ARAÇTAN AYRILMA
 Config.Exit = {
+    -- Koltuktan ayırma yöntemi:
+    --   'task'  : TaskLeaveVehicle flag 16 — ağda senkron, animasyonsuz ışınlanarak çıkış.
+    --             Diğer oyuncuların ekranında da ped koltuktan anında iner. (önerilen)
+    --   'clear' : ClearPedTasksImmediately — yalnızca yerel; diğer oyuncular ped'i
+    --             ragdoll bitene kadar koltukta görür.
+    method            = 'task',
+    taskExitMaxFrames = 5,     -- görev bu kadar karede işlenmezse 'clear' ile kesilir
+
+    -- Ağ devri (ms): ragdoll'dan önce ped araç dışında, ragdoll'suz ve fırlatma hızıyla
+    -- hareket eder; diğer istemcilerdeki klon bu sürede koltuktan iner ve sonra ragdoll'u
+    -- izler. 0 = ilk karede ragdoll (klon ragdoll bitene kadar koltukta kalır).
+    -- Diğer oyuncular hâlâ koltukta görüyorsa 250-300 deneyin.
+    networkHandoffMs  = 150,
+
     upOffset         = 0.45,   -- koltuk noktasından yukarı (m)
     forwardOffset    = 0.20,   -- fırlama yönünde yatay (m) — görünür teleport olmasın diye küçük
     wallMargin       = 0.35,   -- başlangıç noktası duvar/direk içindeyse bu kadar geri çekilir
