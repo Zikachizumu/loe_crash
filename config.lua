@@ -11,14 +11,14 @@ Config.Enabled = true
 Config.DisableVanillaWindscreenEjection = true
 
 -- ------------------------------------------------------------------ DİĞER OYUNCULARIN EKRANI
--- Fırlayan oyuncunun klonu diğer ekranlarda ragdoll bilgisi gelene kadar önce koltukta
--- oturur, sonra GTA onu kapı yanına ayakta koyar (Exit.networkHandoffMs + ağ gecikmesi).
--- hideRemoteUntilRagdoll: bu ara pozlarda klon yalnızca izleyen ekranda görünmez tutulur,
--- araç dışında ragdoll'a geçince görünür. Fırlayan oyuncu bunu replike oyuncu state'iyle
--- (loeCrashEjecting) bildirir; sunucu tarafı kod gerekmez.
+-- Fırlayan oyuncunun klonu diğer ekranlarda koltuktan inince GTA onu kapı yanına ayakta
+-- koyar ve ragdoll bilgisi gelene kadar (~Exit.networkHandoffMs) orada tutar.
+-- hideRemoteUntilRagdoll: bu ayakta pozda klon yalnızca izleyen ekranda görünmez tutulur,
+-- ragdoll'a geçince görünür (koltuktayken gizlenmez). Fırlayan oyuncu bunu replike oyuncu
+-- state'iyle (loeCrashEjecting) bildirir; sunucu tarafı kod gerekmez.
 Config.Sync = {
     hideRemoteUntilRagdoll = true,
-    hideMaxMs              = 1500,   -- klon bu sürede ragdoll'a geçmezse yine de gösterilir
+    hideMaxMs              = 1500,   -- bayraktan itibaren; klon bu sürede ragdoll'a geçmezse yine de gösterilir
 }
 
 -- ------------------------------------------------------------------ DEBUG

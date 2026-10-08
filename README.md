@@ -103,9 +103,9 @@ Diğer istemcilerdeki klon koltuktan ancak ped araç dışında **ve ragdoll'suz
 Çözüm iki parçalıdır; ayrı bir kopya veya sunucu kodu yoktur, herkes aynı ped'i görür:
 
 1. **Ağ devri** (`Exit.networkHandoffMs`, 150 ms): ped ragdoll'dan önce araç dışında, ragdoll'suz ve fırlatma hızıyla hareket eder. Klon bu sürede koltuktan iner ve sonra gerçek ragdoll'u izler.
-2. **Ara pozların gizlenmesi** (`Config.Sync.hideRemoteUntilRagdoll`): GTA koltuktan indirdiği klonu kapı yanına ayakta koyar ve ragdoll bilgisi gelene kadar orada tutar. Fırlayan oyuncu ayrılmadan önce replike oyuncu state'ini (`loeCrashEjecting`) açar; diğer istemciler bu bayrak açıkken klonu araç dışında ragdoll'a geçene kadar yalnızca kendi ekranlarında görünmez tutar (`SetEntityLocallyInvisible`, en fazla `hideMaxMs`). İzleyen, koltukta oturuşu ve kapı yanında duruşu görmez; ped doğrudan uçarken belirir.
+2. **Ayakta pozun gizlenmesi** (`Config.Sync.hideRemoteUntilRagdoll`): GTA koltuktan indirdiği klonu kapı yanına ayakta koyar ve ragdoll bilgisi gelene kadar orada tutar. Fırlayan oyuncu ayrılmadan önce replike oyuncu state'ini (`loeCrashEjecting`) açar; diğer istemciler bu bayrak açıkken klonu araç dışına çıktığı kareden ragdoll'a geçene kadar yalnızca kendi ekranlarında görünmez tutar (`SetEntityLocallyInvisible`, en fazla `hideMaxMs`). Koltuktayken gizlenmez: bayrak klon koltuktan inmeden ~100 ms önce gelir, o süreyi de gizlemek karakteri gereksiz yere kaybettirir. İzleyen kapı yanındaki duruşu görmez; ped koltuktan doğrudan uçarken belirir.
 
-Ölçüm (80+ km/sa, ağ zamanıyla): fırlayan ped koltuktan çıkış → ~165 ms sonra izleyende klon koltuktan iner; fırlayan ped ragdoll → ~155 ms sonra izleyende ragdoll. Gecikme ağ gecikmesidir, giderilemez.
+Ölçüm (80-200 km/sa, ağ zamanıyla): fırlayan ped koltuktan çıkış → ~65 ms sonra izleyene bayrak gelir, ~165-185 ms sonra klon koltuktan iner; fırlayan ped ragdoll → ~110-155 ms sonra izleyende ragdoll. Ped izleyende ağ devri kadar (~80 ms) görünmez kalır. Ağ gecikmesi giderilemez. `networkHandoffMs` düşürülürse görünmez süre kısalır, ancak klonun koltuktan inme bilgisi ragdoll'la aynı pakete düşerse klon ragdoll boyunca koltukta kalır; 150 ms ölçülmüş güvenli değerdir.
 
 Diğer oyuncular hâlâ koltukta veya kapı yanında görüyorsa:
 

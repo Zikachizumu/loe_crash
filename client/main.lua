@@ -653,10 +653,12 @@ AddEventHandler('onResourceStop', function(resource)
 end)
 
 -- ------------------------------------------------------------------ diğer oyuncular
--- Fırlayan oyuncunun klonu bu ekranda ragdoll bilgisi gelene kadar önce koltukta oturur,
--- sonra GTA onu araçtan indirip kapı yanına ayakta koyar. Bu ara pozlar gösterilmez:
--- oyuncunun EJECT_STATE_KEY bayrağı açıkken klon, araç dışında ragdoll'a geçene kadar
--- yalnızca bu istemcide görünmez tutulur (en fazla Config.Sync.hideMaxMs).
+-- Fırlayan oyuncunun klonu bu ekranda ağ gecikmesi kadar koltukta oturur, sonra GTA onu
+-- araçtan indirip kapı yanına AYAKTA koyar ve ragdoll bilgisi gelene kadar (~ağ devri)
+-- orada tutar. Bu ayakta poz gösterilmez: oyuncunun EJECT_STATE_KEY bayrağı açıkken klon,
+-- araç dışına çıktığı kareden ragdoll'a geçene kadar yalnızca bu istemcide görünmez
+-- tutulur. Koltuktayken GİZLENMEZ: bayrak klon inmeden ~100 ms önce gelir, o süreyi
+-- de gizlemek karakteri gereksiz yere kaybettirir (gecikme hissi).
 local hidingRemote = {}
 
 local function hideRemoteUntilRagdoll(serverId)
@@ -665,20 +667,24 @@ local function hideRemoteUntilRagdoll(serverId)
 
     CreateThread(function()
         local hideUntil = GetGameTimer() + Config.Sync.hideMaxMs
+        local hiddenAt
         while GetGameTimer() < hideUntil do
             local player = GetPlayerFromServerId(serverId)
             if player == -1 then break end
             local ped = GetPlayerPed(player)
             if ped == 0 or not DoesEntityExist(ped) then break end
-            if truthy(IsPedRagdoll(ped)) and not truthy(IsPedInAnyVehicle(ped, false)) then break end
-            SetEntityLocallyInvisible(ped)   -- her kare çağrılmalı; yalnızca bu kare, yalnızca bu istemci
+            if not truthy(IsPedInAnyVehicle(ped, false)) then
+                if truthy(IsPedRagdoll(ped)) then break end
+                hiddenAt = hiddenAt or GetGameTimer()
+                SetEntityLocallyInvisible(ped)   -- her kare çağrılmalı; yalnızca bu kare, yalnızca bu istemci
+            end
             Wait(0)
             -- Handler değer bag'e uygulanmadan çağrılır: bayrak ilk kareden sonra okunur
             -- (fırlatma ragdoll teyit edilemeden iptal olduysa kapanmıştır)
             if Player(serverId).state[EJECT_STATE_KEY] ~= true then break end
         end
-        Dbg.log('uzak oyuncu %d: gizleme bitti (%d ms kala)  nt=%d',
-            serverId, math.max(0, hideUntil - GetGameTimer()), GetNetworkTime())
+        Dbg.log('uzak oyuncu %d: gizleme bitti, görünmez kalma %d ms  nt=%d',
+            serverId, hiddenAt and (GetGameTimer() - hiddenAt) or 0, GetNetworkTime())
         hidingRemote[serverId] = nil
     end)
 end
