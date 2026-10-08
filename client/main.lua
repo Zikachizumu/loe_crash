@@ -37,6 +37,7 @@ local TRACE_OPTIONS = 4                   -- OptionIgnoreNoCollision
 local RAGDOLL_TYPE_NORMAL = 0
 local APPLY_TYPE_IMPULSE = 1
 local LEAVE_FLAG_WARP_OUT = 16            -- TASK_LEAVE_VEHICLE: animasyonsuz, ışınlanarak çıkış (kapı kapalı)
+local EJECT_STATE_KEY = 'loeCrashEjecting' -- replike oyuncu state'i: fırlatma sürüyor
 
 local ctx = {
     state = STATE.OUTSIDE,
@@ -270,7 +271,14 @@ local function enterVehicle(ped, veh, now)
     setState(STATE.SAMPLING, 'desteklenen araca binildi')
 end
 
+-- Diğer istemciler bu bayrak açıkken klonu ragdoll'a geçene kadar gizler (bkz. "diğer oyuncular")
+local function setEjectingState(on)
+    if (LocalPlayer.state[EJECT_STATE_KEY] == true) == on then return end
+    LocalPlayer.state:set(EJECT_STATE_KEY, on, true)
+end
+
 local function resetAll(reason)
+    setEjectingState(false)
     leaveVehicle()
     ctx.candidateAt = 0
     ctx.cooldownUntil = 0
@@ -513,7 +521,12 @@ local function confirmCrash(ped, veh)
 
     an.launch = P.computeLaunch(an, Config.Launch, math.random)
     an.cooldownMs = Config.Detection.cooldownMs
+
+    -- Bayrak ayrılmadan ÖNCE açılır ki klon koltuktan inmeden diğer istemcilere ulaşsın;
+    -- ragdoll'dan hemen sonra değil, fırlatma bitince kapanır (klonun ragdoll'u gecikmeli gelir)
+    setEjectingState(true)
     runEjection(ped, veh, an)
+    setEjectingState(false)
 end
 
 -- ------------------------------------------------------------------ ana döngü
@@ -636,6 +649,46 @@ end)
 AddEventHandler('onResourceStop', function(resource)
     if resource ~= GetCurrentResourceName() then return end
     restoreVanillaEjection()
+    setEjectingState(false)
+end)
+
+-- ------------------------------------------------------------------ diğer oyuncular
+-- Fırlayan oyuncunun klonu bu ekranda ragdoll bilgisi gelene kadar önce koltukta oturur,
+-- sonra GTA onu araçtan indirip kapı yanına ayakta koyar. Bu ara pozlar gösterilmez:
+-- oyuncunun EJECT_STATE_KEY bayrağı açıkken klon, araç dışında ragdoll'a geçene kadar
+-- yalnızca bu istemcide görünmez tutulur (en fazla Config.Sync.hideMaxMs).
+local hidingRemote = {}
+
+local function hideRemoteUntilRagdoll(serverId)
+    if hidingRemote[serverId] then return end
+    hidingRemote[serverId] = true
+
+    CreateThread(function()
+        local hideUntil = GetGameTimer() + Config.Sync.hideMaxMs
+        while GetGameTimer() < hideUntil do
+            local player = GetPlayerFromServerId(serverId)
+            if player == -1 then break end
+            local ped = GetPlayerPed(player)
+            if ped == 0 or not DoesEntityExist(ped) then break end
+            if truthy(IsPedRagdoll(ped)) and not truthy(IsPedInAnyVehicle(ped, false)) then break end
+            SetEntityLocallyInvisible(ped)   -- her kare çağrılmalı; yalnızca bu kare, yalnızca bu istemci
+            Wait(0)
+            -- Handler değer bag'e uygulanmadan çağrılır: bayrak ilk kareden sonra okunur
+            -- (fırlatma ragdoll teyit edilemeden iptal olduysa kapanmıştır)
+            if Player(serverId).state[EJECT_STATE_KEY] ~= true then break end
+        end
+        Dbg.log('uzak oyuncu %d: gizleme bitti (%d ms kala)  nt=%d',
+            serverId, math.max(0, hideUntil - GetGameTimer()), GetNetworkTime())
+        hidingRemote[serverId] = nil
+    end)
+end
+
+AddStateBagChangeHandler(EJECT_STATE_KEY, nil, function(bagName, _, value)
+    if value ~= true or not Config.Sync.hideRemoteUntilRagdoll then return end
+    local serverId = tonumber(bagName:match('^player:(%d+)$'))
+    if not serverId or serverId == GetPlayerServerId(PlayerId()) then return end
+    Dbg.log('uzak oyuncu %d: fırlatma bayrağı geldi  nt=%d', serverId, GetNetworkTime())
+    hideRemoteUntilRagdoll(serverId)
 end)
 
 -- ------------------------------------------------------------------ exports (başka kemer sistemleri için)

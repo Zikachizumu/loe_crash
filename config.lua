@@ -10,6 +10,17 @@ Config.Enabled = true
 -- değerine döndürülür.
 Config.DisableVanillaWindscreenEjection = true
 
+-- ------------------------------------------------------------------ DİĞER OYUNCULARIN EKRANI
+-- Fırlayan oyuncunun klonu diğer ekranlarda ragdoll bilgisi gelene kadar önce koltukta
+-- oturur, sonra GTA onu kapı yanına ayakta koyar (Exit.networkHandoffMs + ağ gecikmesi).
+-- hideRemoteUntilRagdoll: bu ara pozlarda klon yalnızca izleyen ekranda görünmez tutulur,
+-- araç dışında ragdoll'a geçince görünür. Fırlayan oyuncu bunu replike oyuncu state'iyle
+-- (loeCrashEjecting) bildirir; sunucu tarafı kod gerekmez.
+Config.Sync = {
+    hideRemoteUntilRagdoll = true,
+    hideMaxMs              = 1500,   -- klon bu sürede ragdoll'a geçmezse yine de gösterilir
+}
+
 -- ------------------------------------------------------------------ DEBUG
 Config.Debug = {
     enabled        = false,        -- resource açılırken debug açık mı
@@ -137,16 +148,15 @@ Config.Launch = {
 -- ------------------------------------------------------------------ ARAÇTAN AYRILMA
 Config.Exit = {
     -- Koltuktan ayırma yöntemi:
-    --   'task'  : TaskLeaveVehicle flag 16 — ağda senkron, animasyonsuz ışınlanarak çıkış.
-    --             Diğer oyuncuların ekranında da ped koltuktan anında iner. (önerilen)
-    --   'clear' : ClearPedTasksImmediately — yalnızca yerel; diğer oyuncular ped'i
-    --             ragdoll bitene kadar koltukta görür.
-    method            = 'task',
-    taskExitMaxFrames = 5,     -- görev bu kadar karede işlenmezse 'clear' ile kesilir
+    --   'clear' : ClearPedTasksImmediately — aynı karede, animasyonsuz. (önerilen)
+    --   'task'  : TaskLeaveVehicle flag 16 — çarpışma anındaki hızda testte 5 karede
+    --             işlenmedi ve 'clear'e düştü; ped bu sürede koltukta bekler.
+    method            = 'clear',
+    taskExitMaxFrames = 5,     -- 'task': görev bu kadar karede işlenmezse 'clear' ile kesilir
 
     -- Ağ devri (ms): ragdoll'dan önce ped araç dışında, ragdoll'suz ve fırlatma hızıyla
-    -- hareket eder; diğer istemcilerdeki klon bu sürede koltuktan iner ve sonra ragdoll'u
-    -- izler. 0 = ilk karede ragdoll (klon ragdoll bitene kadar koltukta kalır).
+    -- hareket eder. Diğer istemcilerdeki klon ancak ped araç dışında VE ragdoll'suzken
+    -- koltuktan iner; 0 = ilk karede ragdoll, klon ragdoll bitene kadar koltukta kalır.
     -- Diğer oyuncular hâlâ koltukta görüyorsa 250-300 deneyin.
     networkHandoffMs  = 150,
 

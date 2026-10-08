@@ -2,7 +2,7 @@
 
 Fizik tabanlı araç çarpışması ve araçtan fırlama sistemi (FiveM, GTA V Enhanced, Lua 5.4, Qbox uyumlu, OneSync uyumlu).
 
-Karakter koltuktan ağda senkron biçimde ayrılır ve kısa bir ağ devrinden (varsayılan 150 ms) sonra **ragdoll'a** geçer; havada oturma/sürüş pozu korunmaz, diğer oyuncular da fırlamayı anında görür. Fırlama yönü sabit heading'den değil, çarpışma öncesi gerçek dünya velocity'sinden ve çarpışmadaki velocity değişiminden hesaplanır.
+Karakter koltuktan animasyonsuz ayrılır ve kısa bir ağ devrinden (varsayılan 150 ms) sonra **ragdoll'a** geçer; havada oturma/sürüş pozu korunmaz, diğer oyuncular da fırlamayı ağ gecikmesiyle görür. Fırlama yönü sabit heading'den değil, çarpışma öncesi gerçek dünya velocity'sinden ve çarpışmadaki velocity değişiminden hesaplanır.
 
 - Oyun mantığı yalnızca client'ta. Veritabanı yok. Tek server dosyası `server/debug.lua` (yalnızca `Config.Debug.serverLog` açıkken debug satırlarını sunucu loguna yazar).
 - Yalnızca yerel oyuncunun kendi ped'ini yönetir (NPC yok). Her istemci kendi ped'inin sahibi olduğundan network sahiplik sorunu oluşmaz.
@@ -88,25 +88,30 @@ Dönüş için net doğrusal hız üretmeyen merkez dışı impuls çiftleri uyg
 ### Araçtan ayırma sırası
 
 1. Fizik verisi zaten analiz tablosunda.
-2. `TaskLeaveVehicle(ped, veh, 16)` (`Config.Exit.method = 'task'`): ağda senkron araçtan inme görevi, flag 16 animasyon oynatmaz, ped'i ışınlayarak çıkarır. Görev `taskExitMaxFrames` karede işlenmezse `ClearPedTasksImmediately` ile kesilir.
+2. `ClearPedTasksImmediately` (`Config.Exit.method = 'clear'`): sürüş/oturma görevi ve koltuk bağlantısı aynı karede **animasyonsuz** kesilir. `'task'` (`TaskLeaveVehicle` flag 16) seçeneği de vardır, ancak çarpışma anındaki hızda testte 5 karede işlenmedi.
 3. Bağlantı hâlâ kopmadıysa `SetEntityCoords` ped'i araçtan warp eder.
 4. Başlangıç noktası: koltuk bone'u (`seat_dside_f`, `seat_pside_f`, ...) + yukarı 0.45 m + fırlama yönünde 0.20 m. Bir ışın duvar/direk içine düşmeyi, bir ışın zeminin altına düşmeyi engeller (fırlatma başına 2 ışın).
-5. **Ağ devri** (`networkHandoffMs`, 150 ms): ped araç dışında, ragdoll'suz ve fırlatma velocity'siyle hareket eder. Diğer istemcilerdeki klon bu sürede koltuktan iner.
+5. **Ağ devri** (`networkHandoffMs`, 150 ms): ped araç dışında, ragdoll'suz ve fırlatma velocity'siyle hareket eder. Diğer istemcilerdeki klon bu sürede koltuktan iner (bkz. [Diğer oyuncuların görmesi](#diğer-oyuncuların-görmesi)).
 6. `SetPedToRagdoll` istenir ve `IsPedRagdoll` ile **doğrulanır** (en fazla 10 kare, her kare tekrar denenir). Aktivasyon anındaki hız ragdoll gövdesine aktarılır, dönüş impulsları verilir, hasar bir kez uygulanır.
 7. Ped araç kutusundan çıkana kadar (150 ms – 1200 ms) araçla çarpışması kapalı tutulur, koltuğa geri yapışmaz.
 8. Havadayken ragdoll erken biterse yeniden başlatılır. Yere inip ragdoll bitince GTA'nın normal kalkma davranışı devralır.
 
 ## Diğer oyuncuların görmesi
 
-Ped koltuktan yalnızca yerel olarak koparılıp (`ClearPedTasksImmediately`) aynı karede ragdoll'a geçerse diğer istemcilerdeki klon bunu almaz: ragdoll süresince koltukta oturur görünür (üstündeki oyuncu etiketi de araçta kalır), ragdoll bitince kapı yanına iner ve oyuncu yürüyene kadar orada durur, sonra gerçek yerine ışınlanır.
+Diğer istemcilerdeki klon koltuktan ancak ped araç dışında **ve ragdoll'suz** iken iner. Ped koltuktan çıktığı karede ragdoll'a geçerse klon ragdoll süresince koltukta oturur görünür (üstündeki oyuncu etiketi de araçta kalır), ragdoll bitince kapı yanına iner ve oyuncu yürüyene kadar orada durur, sonra gerçek yerine ışınlanır.
 
-Bu yüzden çıkış ağda senkron `TaskLeaveVehicle(16)` ile yapılır ve ragdoll'dan önce kısa bir ağ devri bırakılır. Klon koltuktan inip ardından gerçek ped'in ragdoll'unu izler; ayrı bir kopya veya sunucu event'i yoktur, herkes aynı ped'i görür.
+Çözüm iki parçalıdır; ayrı bir kopya veya sunucu kodu yoktur, herkes aynı ped'i görür:
 
-Diğer oyuncular hâlâ koltukta görüyorsa:
+1. **Ağ devri** (`Exit.networkHandoffMs`, 150 ms): ped ragdoll'dan önce araç dışında, ragdoll'suz ve fırlatma hızıyla hareket eder. Klon bu sürede koltuktan iner ve sonra gerçek ragdoll'u izler.
+2. **Ara pozların gizlenmesi** (`Config.Sync.hideRemoteUntilRagdoll`): GTA koltuktan indirdiği klonu kapı yanına ayakta koyar ve ragdoll bilgisi gelene kadar orada tutar. Fırlayan oyuncu ayrılmadan önce replike oyuncu state'ini (`loeCrashEjecting`) açar; diğer istemciler bu bayrak açıkken klonu araç dışında ragdoll'a geçene kadar yalnızca kendi ekranlarında görünmez tutar (`SetEntityLocallyInvisible`, en fazla `hideMaxMs`). İzleyen, koltukta oturuşu ve kapı yanında duruşu görmez; ped doğrudan uçarken belirir.
+
+Ölçüm (80+ km/sa, ağ zamanıyla): fırlayan ped koltuktan çıkış → ~165 ms sonra izleyende klon koltuktan iner; fırlayan ped ragdoll → ~155 ms sonra izleyende ragdoll. Gecikme ağ gecikmesidir, giderilemez.
+
+Diğer oyuncular hâlâ koltukta veya kapı yanında görüyorsa:
 
 1. İki oyuncuda da `Config.Debug.commandEnabled = true` ve `serverLog = true` yapın, `/crashdebug` açın.
-2. Fırlayan oyuncunun `ayrılma: ... nt=` satırı ile izleyen oyuncunun `uzak oyuncu <id>: araçta=false ... nt=` satırındaki `nt` (ağ zamanı, ms) farkı klonun koltuktan ne kadar gecikmeyle indiğini gösterir.
-3. Fark ragdoll süresi kadarsa (birkaç saniye) `networkHandoffMs` değerini 250-300 yapın.
+2. Fırlayan oyuncunun `ayrılma: ... nt=` satırı ile izleyen oyuncunun `uzak oyuncu <id>: araçta=false ... nt=` / `gizleme bitti` satırlarındaki `nt` (ağ zamanı, ms) farkına bakın. `uzak oyuncu` numarası sunucu ID'sidir (HUD'daki oyuncu ID'sinden farklı olabilir).
+3. Klon ragdoll süresi kadar (birkaç saniye) koltukta kalıyorsa `networkHandoffMs` değerini 250-300 yapın.
 
 ## Emniyet kemeri
 
@@ -133,8 +138,9 @@ Diğer export'lar: `IsSeatbeltFastened()`, `IsEjecting()`, `GetCrashState()`.
 | `Detection.side.*` | 40 / 40 | Yan darbe min hız / yanal Δv |
 | `Detection.confirmDelayMs` | 60 | velocityAfter için bekleme |
 | `Detection.cooldownMs` | 3000 | Fırlatma sonrası tekrar tetiklenmeme süresi |
-| `Exit.method` | `'task'` | Koltuktan ayırma: `'task'` ağda senkron, `'clear'` yalnızca yerel |
+| `Exit.method` | `'clear'` | Koltuktan ayırma: `'clear'` aynı karede, `'task'` TaskLeaveVehicle(16) |
 | `Exit.networkHandoffMs` | 150 | Ragdoll öncesi ağ devri; diğer oyuncular hâlâ koltukta görüyorsa 250-300 |
+| `Sync.hideRemoteUntilRagdoll` | true | Diğer ekranlarda klon ragdoll'a geçene kadar gizlenir (koltuk / kapı yanı pozu görünmez) |
 | `Launch.velocityKeepFactor` | 0.85 | Çarpışma öncesi hızın korunan payı |
 | `Launch.inertiaFactor` | 0.15 | İleri Δv eki |
 | `Launch.lateralFactor` | 0.45 | Yanal Δv eki |
